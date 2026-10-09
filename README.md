@@ -14,7 +14,7 @@ Logiciel desktop de montage vidéo pour Windows 10+.
 - Compilation automatique GitHub Actions.
 
 ## GitHub
-Déposez tout le contenu à la racine d'un dépôt GitHub, puis poussez sur `main`. Le workflow `.github/workflows/build-windows.yml` se lance automatiquement et produit l'installateur dans l'artefact `EcomVideoStudio-Windows` et dans une Release.
+Déposez tout le contenu à la racine d'un dépôt GitHub, puis poussez sur `main`. Le workflow `.github/workflows/build-windows.yml` se lance automatiquement. Le workflow ne dépend pas de `package-lock.json`, afin d’éviter l’erreur de cache npm lors du premier dépôt. et produit l'installateur dans l'artefact `EcomVideoStudio-Windows` et dans une Release.
 
 ## Démarrage local
 npm install
