@@ -8,6 +8,8 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,12 +25,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: EcomVideoStudio-Windows
-          path: release/*
+          path: |
+            release/*.exe
+            release/*.blockmap
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/heads/main')
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ github.run_number }}
+          tag_name: v1.0.${{ github.run_number }}
           name: EcomVideoStudio Build ${{ github.run_number }}
-          files: release/*
+          files: release/*.exe
           generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

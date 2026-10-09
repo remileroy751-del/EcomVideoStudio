@@ -1,6 +1,6 @@
 const {app,BrowserWindow,ipcMain,dialog}=require("electron");
 const path=require("path"),fs=require("fs"),{execFile}=require("child_process");
-const ffmpegPath=require("ffmpeg-static"); let win;
+const ffmpegPath=require("ffmpeg-static").replace("app.asar","app.asar.unpacked"); let win;
 function createWindow(){win=new BrowserWindow({width:1500,height:930,minWidth:1100,minHeight:700,backgroundColor:"#090b10",webPreferences:{preload:path.join(__dirname,"preload.js"),contextIsolation:true,nodeIntegration:false},title:"EcomVideoStudio"});win.loadFile(path.join(__dirname,"index.html"))}
 app.whenReady().then(createWindow);app.on("window-all-closed",()=>{if(process.platform!=="darwin")app.quit()});
 ipcMain.handle("open-media",async()=>{let r=await dialog.showOpenDialog(win,{properties:["openFile","multiSelections"],filters:[{name:"Médias",extensions:["mp4","mov","mkv","avi","webm","m4v","wmv","flv","mpeg","mpg","3gp","mp3","wav","aac","m4a","ogg","flac"]}]});return r.canceled?[]:r.filePaths});
