@@ -1,9 +1,124 @@
-<!doctype html><html lang="fr"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' blob: data:; media-src 'self' file: blob: data:;"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EcomVideoStudio</title><link rel="stylesheet" href="style.css"></head><body>
-<header class="topbar"><div class="brand"><div class="logo3d"><span>E</span><b>V</b></div><div><strong>EcomVideoStudio</strong><small>Professional Desktop Editor</small></div></div><div class="top-actions"><button id="newBtn">＋ Nouveau</button><button id="openProject">Ouvrir</button><button id="saveProject">Sauvegarder</button><button class="exportBtn" id="exportBtn">Exporter</button></div></header>
-<div class="workspace"><aside class="sidebar"><button class="tool active" data-panel="media">▣<span>Médias</span></button><button class="tool" data-panel="audio">♫<span>Audio</span></button><button class="tool" data-panel="text">T<span>Texte</span></button><button class="tool" data-panel="captions">CC<span>Légendes</span></button><button class="tool" data-panel="effects">✦<span>Effets</span></button><button class="tool" data-panel="transitions">◈<span>Transitions</span></button><div class="side-bottom">⚙<small>Paramètres</small></div></aside>
-<section class="leftpanel"><div class="panel-head"><h2 id="panelTitle">Médias</h2><button id="importBtn" class="primary">Importer</button></div><div id="panelContent"></div></section>
-<main class="center"><div class="preview"><div class="preview-bg"><video id="video" controls></video><div id="emptyPreview">Importez une vidéo pour commencer</div></div><div class="preview-controls"><button id="play">▶</button><span id="time">00:00 / 00:00</span><div class="scrub"><div id="scrubFill"></div></div><span>16:9</span></div></div>
-<div class="timeline-head"><div><button id="splitBtn">✂ Couper</button><button id="deleteBtn">🗑 Supprimer</button></div><div class="zoom">− <input id="zoom" type="range" min="20" max="100" value="55"> ＋</div></div>
-<div class="timeline" id="timeline"><div class="ruler"></div><div class="track video-track" id="videoTrack"><label>Vidéo</label></div><div class="track audio-track" id="audioTrack"><label>Audio</label></div><div class="playhead" id="playhead"></div></div></main></div>
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file:; media-src 'self' file: blob: data:;">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EcomVideoStudio</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><div class="logo3d"><span>E</span><b>V</b></div><div><strong>EcomVideoStudio</strong><small>Professional Desktop Editor</small></div></div>
+  <div class="top-actions">
+    <button id="newBtn">＋ Nouveau</button><button id="openProject">Ouvrir</button><button id="saveProject">Sauvegarder</button><button class="exportBtn" id="exportBtn">Exporter</button>
+  </div>
+</header>
+
+<div class="workspace">
+  <aside class="sidebar" id="sidebar">
+    <button class="tool active" data-panel="media"><i>▣</i><span>Médias</span></button>
+    <button class="tool" data-panel="audio"><i>♫</i><span>Audio</span></button>
+    <button class="tool" data-panel="text"><i>T</i><span>Texte</span></button>
+    <button class="tool" data-panel="emoji"><i>☺</i><span>Emoji</span></button>
+    <button class="tool" data-panel="captions"><i>CC</i><span>Légendes</span></button>
+    <button class="tool" data-panel="effects"><i>✦</i><span>Effets</span></button>
+    <button class="tool" data-panel="transitions"><i>◈</i><span>Transitions</span></button>
+  </aside>
+
+  <section class="leftpanel">
+    <div class="panel-head"><h2 id="panelTitle">Médias</h2><button id="importBtn" class="primary">Importer</button></div>
+    <div id="panelContent"></div>
+  </section>
+
+  <main class="center">
+    <div class="preview">
+      <div class="preview-area" id="previewArea">
+        <div class="stage" id="stage">
+          <div class="layer" id="layer0"><div class="lmedia"><video playsinline preload="auto"></video><img alt=""></div><div class="vig"></div></div>
+          <div class="layer" id="layer1"><div class="lmedia"><video playsinline preload="auto"></video><img alt=""></div><div class="vig"></div></div>
+          <canvas id="overlayCanvas"></canvas>
+          <div id="emptyPreview">Ajoutez un média à la timeline<br><small>avec le bouton ＋ d'une miniature</small></div>
+        </div>
+      </div>
+      <div class="seekbar" id="seekbar"><div class="seekfill" id="seekfill"></div></div>
+      <div class="playbar">
+        <div class="pb-left"><span class="tc"><b id="tcCur">00:00</b><em> / </em><span id="tcTot">00:00</span></span></div>
+        <div class="pb-center">
+          <button class="icon" id="toStart" title="Début (Origine)">⏮</button>
+          <button class="icon play" id="play" title="Lecture / Pause (Espace)">▶</button>
+          <button class="icon" id="toEnd" title="Fin">⏭</button>
+        </div>
+        <div class="pb-right">
+          <div class="ratio-wrap">
+            <button id="ratioBtn" class="ratio-btn" title="Format du projet">
+              <span class="rbox" id="ratioIcon"></span><span id="ratioLabel">9:16</span><span class="caret">▾</span>
+            </button>
+            <div class="ratio-menu hidden" id="ratioMenu"></div>
+          </div>
+          <button class="icon" id="fullscreen" title="Plein écran">⛶</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="tl-toolbar">
+      <div class="tl-tools">
+        <button id="undoBtn" title="Annuler (Ctrl+Z)">↶</button><button id="redoBtn" title="Rétablir (Ctrl+Y)">↷</button>
+        <span class="sep"></span>
+        <button id="splitBtn" title="Couper à la tête de lecture (Ctrl+B)">✂ Couper</button>
+        <button id="deleteBtn" title="Supprimer (Suppr)">🗑 Supprimer</button>
+      </div>
+      <div class="zoom">−<input id="zoom" type="range" min="10" max="200" value="50">＋</div>
+    </div>
+    <div class="tl-wrap">
+      <div class="tl-gutter"><div class="g-ruler"></div><div class="g-row g-over" title="Textes & emoji">T ☺</div><div class="g-row g-main" title="Vidéo / images">▣</div><div class="g-row g-aud" title="Audio">♫</div></div>
+      <div class="tl-scroll" id="tlScroll">
+        <div class="tl-inner" id="tlInner">
+          <div class="tl-ruler" id="ruler"></div>
+          <div class="tl-track t-over" id="trackOver"></div>
+          <div class="tl-track t-main" id="trackMain"></div>
+          <div class="tl-track t-aud" id="trackAudio"></div>
+          <div class="playhead" id="playhead"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <aside class="inspector" id="inspector"></aside>
+</div>
+
 <div class="statusbar"><span id="status">Prêt</span><span>MP4 • H.264 • Windows 10+</span></div>
-<div class="modal hidden" id="exportModal"><div class="modal-card"><h2>Exporter la vidéo</h2><p>Choisissez la qualité de sortie.</p><div class="quality-grid"><button data-res="480"><b>480p</b><small>Économique • Web & mobile</small></button><button data-res="1080" class="selected"><b>1080p</b><small>Full HD • Haute qualité</small></button></div><div class="modal-actions"><button id="cancelExport">Annuler</button><button id="doExport" class="exportBtn">Exporter MP4</button></div><pre id="exportLog"></pre></div></div><script src="renderer.js"></script></body></html>
+<div id="toast" class="toast hidden"></div>
+
+<div class="modal hidden" id="exportModal"><div class="modal-card">
+  <h2>Exporter la vidéo</h2>
+  <p id="exportInfo">Choisissez la qualité de sortie.</p>
+  <div id="exportSettings">
+    <div class="quality-grid">
+      <button data-res="480"><b>480p</b><small>Économique</small></button>
+      <button data-res="720"><b>720p</b><small>HD</small></button>
+      <button data-res="1080" class="selected"><b>1080p</b><small>Full HD</small></button>
+    </div>
+    <div class="modal-actions"><button id="cancelExport">Annuler</button><button id="doExport" class="exportBtn">Exporter MP4</button></div>
+  </div>
+  <div id="exportProgress" class="hidden">
+    <div class="pbar"><div id="pfill"></div></div>
+    <div id="pText">Préparation…</div>
+    <div class="modal-actions"><button id="abortExport">Arrêter l'export</button></div>
+  </div>
+  <div id="exportDone" class="hidden">
+    <div id="doneText"></div>
+    <div class="modal-actions"><button id="revealExport">Afficher dans le dossier</button><button id="closeExport" class="primary">Fermer</button></div>
+  </div>
+</div></div>
+
+<script src="shared/data.js"></script>
+<script src="js/emoji-data.js"></script>
+<script src="js/overlay.js"></script>
+<script src="js/core.js"></script>
+<script src="js/player.js"></script>
+<script src="js/timeline.js"></script>
+<script src="js/panels.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
