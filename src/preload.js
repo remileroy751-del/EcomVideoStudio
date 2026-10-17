@@ -1,18 +1,15 @@
-const { contextBridge, ipcRenderer, webUtils } = require('electron');
-const inv = (c, ...a) => ipcRenderer.invoke(c, ...a);
-contextBridge.exposeInMainWorld('ecom', {
-  openMedia: () => inv('open-media'),
-  probe: p => inv('probe-media', p),
-  thumbnail: (p, type, dur) => inv('thumbnail', p, type, dur),
-  waveform: p => inv('waveform', p),
-  makeProxy: p => inv('make-proxy', p),
-  fileExists: p => inv('file-exists', p),
-  saveProject: d => inv('save-project', d),
-  loadProject: () => inv('load-project'),
-  pickExportPath: n => inv('pick-export-path', n),
-  exportVideo: j => inv('export-video', j),
-  cancelExport: () => inv('cancel-export'),
-  revealFile: p => inv('reveal-file', p),
-  pathForFile: f => { try { return webUtils.getPathForFile(f); } catch { return ''; } },
-  onExportProgress: cb => ipcRenderer.on('export-progress', (_, d) => cb(d))
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
+contextBridge.exposeInMainWorld("ecom", {
+  openMedia: () => ipcRenderer.invoke("open-media"),
+  probe: f => ipcRenderer.invoke("probe", f),
+  saveProject: d => ipcRenderer.invoke("save-project", d),
+  loadProject: () => ipcRenderer.invoke("load-project"),
+  pickExportPath: n => ipcRenderer.invoke("pick-export-path", n),
+  exportVideo: o => ipcRenderer.invoke("export-video", o),
+  getSettings: () => ipcRenderer.invoke("get-settings"),
+  setSettings: o => ipcRenderer.invoke("set-settings", o),
+  transcribe: o => ipcRenderer.invoke("transcribe", o),
+  pathsFromFiles: files => Array.from(files).map(f => { try { return webUtils.getPathForFile(f); } catch (e) { return ""; } }).filter(Boolean),
+  onExportProgress: cb => ipcRenderer.on("export-progress", (_, d) => cb(d)),
+  onCaptionProgress: cb => ipcRenderer.on("caption-progress", (_, d) => cb(d))
 });
