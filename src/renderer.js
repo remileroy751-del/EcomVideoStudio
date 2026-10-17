@@ -6,11 +6,13 @@ let uid = 0;
 const newId = () => "i" + Date.now().toString(36) + (uid++);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-function fileUrl(p) { return encodeURI("file:///" + p.replace(/\\/g, "/")).replace(/#/g, "%23").replace(/\?/g, "%3F"); }
+function fileUrl(p) { return encodeURI("file:///" + p.replace(/\\/g, "/")).replace(/#/g, "%23").replace(/\?/g, "%3F").replace(/'/g, "%27"); }
 function fmt(s, dec) { s = Math.max(0, s || 0); const m = Math.floor(s / 60), r = s - m * 60; return String(m).padStart(2, "0") + ":" + (dec ? r.toFixed(1).padStart(4, "0") : String(Math.floor(r)).padStart(2, "0")); }
 
 let state = freshState();
-function freshState() { return { media: [], clips: [], audioTracks: 1, captions: [], selected: null, resolution: "1080", pps: 40 }; }
+function freshState() { return { media: [], clips: [], audioTracks: 1, captions: [], selected: null, resolution: "1080", ratio: "16:9", pps: 40 }; }
+const isStill = c => c.type === "image" || c.type === "sticker";
+let stickerDir = "";
 const P = { t: 0, playing: false, last: 0 };
 let currentPanel = "media", resolution = "1080", capSettings = { provider: "groq", hasKey: false }, capBusy = false;
 
@@ -23,11 +25,11 @@ const clipAt = (kind, track, t) => state.clips.find(c => c.kind === kind && c.tr
 const layers = [], aEls = [];
 for (let i = 0; i < 3; i++) {
   const wrap = document.createElement("div"); wrap.className = "layer"; wrap.style.zIndex = i + 1;
-  const v = document.createElement("video"); v.playsInline = true; v.preload = "auto";
+  const v = document.createElement("video"); v.playsInline = true; v.preload = "auto"; v.addEventListener("loadeddata", () => syncMedia(true));
   const img = document.createElement("img");
   wrap.append(v, img); $("layers").appendChild(wrap);
   layers.push({ wrap, v, img, cur: null });
-  const a = new Audio(); a.preload = "auto"; aEls.push({ a, cur: null });
+  const a = new Audio(); a.preload = "auto"; a.addEventListener("loadeddata", () => syncMedia(true)); aEls.push({ a, cur: null });
 }
 
 function drive(el, c, t, sw) {
@@ -45,8 +47,12 @@ function syncMedia(force) {
     const L = layers[i], c = clipAt("video", i, t);
     if (!c) { L.wrap.style.display = "none"; if (!L.v.paused) L.v.pause(); L.cur = null; continue; }
     L.wrap.style.display = "block";
-    L.wrap.style.transform = `translate(${c.x}%,${c.y}%) scale(${c.scale / 100})`;
-    if (c.type === "image") {
+    if (c.type === "sticker") {
+      const a = EcomAnim.at(c.anim || "none", clamp(t - c.start, 0, c.duration), c.duration);
+      L.wrap.style.transform = `translate(${c.x + a.dx * 100}%,${c.y + a.dy * 100}%) rotate(${a.rot}rad) scale(${(c.scale / 100) * a.s})`;
+    } else L.wrap.style.transform = `translate(${c.x}%,${c.y}%) scale(${c.scale / 100})`;
+    const fitMode = c.fit === "fill" ? "cover" : "contain"; L.v.style.objectFit = fitMode; L.img.style.objectFit = fitMode;
+    if (isStill(c)) {
       L.v.style.display = "none"; if (!L.v.paused) L.v.pause();
       L.img.style.display = "block"; setSrc(L.img, c.path); L.cur = c.id;
     } else {
@@ -104,6 +110,7 @@ async function importPaths(paths) {
       setStatus("Analyse de " + p.split(/[\\/]/).pop() + "…");
       const info = await window.ecom.probe(p);
       m = { id: newId(), path: p, name: p.split(/[\\/]/).pop(), type, duration: type === "image" ? 5 : (info.duration || 10), hasAudio: type === "audio" ? true : !!info.hasAudio, width: info.width, height: info.height };
+      if (type === "video") m.thumb = await window.ecom.thumb(p, m.duration);
       state.media.push(m);
     }
     out.push(m);
@@ -128,15 +135,17 @@ function overlaps(clip, track, start, dur) {
   dur = dur == null ? clip.duration : dur;
   return state.clips.some(c => c !== clip && c.kind === clip.kind && c.track === track && start < c.start + c.duration - 1e-6 && start + dur > c.start + 1e-6);
 }
-function addClip(m, kind, track, time) {
+function addClip(m, kind, track, time, extra) {
   const dur = m.type === "image" ? 5 : (m.duration || 5);
   let start = Math.max(0, time || 0);
   for (let i = 0; i < 100; i++) {
     const o = state.clips.find(c => c.kind === kind && c.track === track && start < c.start + c.duration - 1e-6 && start + dur > c.start + 1e-6);
     if (!o) break; start = o.start + o.duration;
   }
-  const c = { id: newId(), mediaId: m.id, kind, track, type: kind === "audio" ? "audio" : m.type, path: m.path, name: m.name, start, inPoint: 0, duration: dur, mediaDur: m.type === "image" ? 0 : dur, scale: 100, x: 0, y: 0, volume: 100, hasAudio: kind === "audio" ? true : !!m.hasAudio };
+  const c = { id: newId(), mediaId: m.id, kind, track, type: kind === "audio" ? "audio" : m.type, path: m.path, name: m.name, start, inPoint: 0, duration: dur, mediaDur: m.type === "image" ? 0 : dur, scale: 100, x: 0, y: 0, volume: 100, hasAudio: kind === "audio" ? true : !!m.hasAudio, thumb: m.thumb || "", fit: "fit" };
+  if (extra) Object.assign(c, extra);
   state.clips.push(c); state.selected = c.id;
+  if (!P.playing) P.t = c.start;
   renderTimeline(); renderProps(); syncMedia(true); updateUI();
   setStatus(`« ${m.name} » ajouté sur ${kind === "video" ? "V" + (track + 1) : "A" + (track + 1)}`);
   return c;
@@ -150,6 +159,22 @@ function dropOnLane(m, lane, t) {
     if (lane.dataset.new) { if (state.audioTracks >= 3) return; state.audioTracks++; track = state.audioTracks - 1; }
   }
   return addClip(m, kind, track, t);
+}
+const STICKERS = [
+  ["Flèche droite", "slideR"], ["Flèche retour", "slideL"], ["Flèche bas", "slideD"], ["Flèche haut", "slideU"], ["Cercle rouge", "pulse"],
+  ["Clic", "tap"], ["Doigt à droite", "slideR"], ["Doigt en bas", "slideD"], ["Surpris", "pulse"], ["Mort de rire", "wiggle"],
+  ["Feu", "bounce"], ["Cœur", "beat"], ["Pouce", "bounce"], ["Cœur brisé", "shake"], ["Applaudir", "tap"],
+  ["100", "beat"], ["Subscribe", "pulse"], ["Subscribe now", "wiggle"], ["Like", "bounce"], ["Share", "pulse"],
+  ["Cloche", "wiggle"], ["Follow", "pulse"], ["Comment", "float"], ["Toucher", "tap"], ["Exclamation", "shake"],
+  ["Étoiles", "spin"], ["Valider", "pulse"], ["Refuser", "shake"], ["Glisser en haut", "slideU"], ["Curseur", "tap"]
+].map((s, i) => ({ id: "s" + String(i + 1).padStart(2, "0"), name: s[0], anim: s[1] }));
+function stickerPath(id) { const d = stickerDir.replace(/[\\/]+$/, ""); return d + (d.indexOf("\\") >= 0 ? "\\" : "/") + id + ".png"; }
+function addSticker(s, track, time) {
+  if (!stickerDir) return setStatus("Chargement des stickers… réessayez dans un instant.");
+  if (time == null) time = P.t;
+  if (track == null) { track = [2, 1, 0].find(tr => !overlaps({ kind: "video" }, tr, time, 3)); if (track == null) track = 2; }
+  const m = { id: "stk_" + s.id, path: stickerPath(s.id), name: s.name, type: "sticker", duration: 3, hasAudio: false };
+  return addClip(m, "video", track, time, { type: "sticker", stickerId: s.id, anim: s.anim, scale: 30, mediaDur: 0 });
 }
 function quickAdd(m) {
   if (m.type === "audio") { const a = state.clips.filter(c => c.kind === "audio" && c.track === 0); return addClip(m, "audio", 0, a.reduce((x, c) => Math.max(x, c.start + c.duration), 0)); }
@@ -168,7 +193,7 @@ function splitAt(t) {
   if (!targets.length) return setStatus("Placez la tête de lecture à l'intérieur d'un clip pour le couper.");
   targets.forEach(c => {
     const d = t - c.start;
-    state.clips.push({ ...c, id: newId(), start: t, inPoint: c.type === "image" ? 0 : c.inPoint + d, duration: c.duration - d });
+    state.clips.push({ ...c, id: newId(), start: t, inPoint: isStill(c) ? 0 : c.inPoint + d, duration: c.duration - d });
     c.duration = d;
   });
   renderTimeline(); syncMedia(true); setStatus("Clip coupé");
@@ -181,8 +206,9 @@ function renderTimeline() {
   let ticks = "";
   for (let s = 0; s <= T; s += step) ticks += `<span class="tick" style="left:${s * pps}px">${fmt(s)}</span>`;
   const clipHtml = (kind, track) => state.clips.filter(c => c.kind === kind && c.track === track).map(c => {
-    const icon = c.type === "image" ? "🖼" : c.kind === "audio" ? "♫" : "🎬";
-    return `<div class="clip ${c.kind} ${c.type}${c.id === state.selected ? " selected" : ""}" data-id="${c.id}" style="left:${c.start * pps}px;width:${Math.max(8, c.duration * pps)}px"><i class="h hl"></i><span class="cname">${icon} ${esc(c.name)}</span><i class="h hr"></i></div>`;
+    const icon = c.type === "sticker" ? "☺" : c.type === "image" ? "🖼" : c.kind === "audio" ? "♫" : "🎬";
+    const bg = c.type === "sticker" ? `;background-image:url('${fileUrl(c.path)}');background-size:auto 78%;background-repeat:no-repeat;background-position:28px center` : c.type === "image" ? `;background-image:linear-gradient(rgba(8,12,24,.45),rgba(8,12,24,.45)),url('${fileUrl(c.path)}');background-size:auto 100%;background-repeat:repeat-x` : c.thumb ? `;background-image:linear-gradient(rgba(8,12,24,.5),rgba(8,12,24,.5)),url('${c.thumb}');background-size:auto 100%;background-repeat:repeat-x` : "";
+    return `<div class="clip ${c.kind} ${c.type}${c.id === state.selected ? " selected" : ""}" data-id="${c.id}" style="left:${c.start * pps}px;width:${Math.max(8, c.duration * pps)}px${bg}"><i class="h hl"></i><span class="cname">${icon} ${esc(c.name)}</span><i class="h hr"></i></div>`;
   }).join("");
   let h = `<div class="tl-inner" style="width:${LABEL + width}px"><div class="ruler-row"><div class="tlabel corner"></div><div class="ruler" id="ruler" style="width:${width}px">${ticks}</div></div>`;
   for (let v = 2; v >= 0; v--) h += `<div class="track-row video"><div class="tlabel">V${v + 1}</div><div class="lane" data-kind="video" data-track="${v}" style="width:${width}px">${clipHtml("video", v)}</div></div>`;
@@ -206,13 +232,13 @@ function startDrag(e, clip, mode) {
       if (!overlaps(clip, track, ns)) { clip.start = ns; clip.track = track; }
     } else if (mode === "right") {
       let nd = Math.max(0.2, o.duration + dx);
-      if (clip.type !== "image") nd = Math.min(nd, clip.mediaDur - clip.inPoint);
+      if (!isStill(clip)) nd = Math.min(nd, clip.mediaDur - clip.inPoint);
       if (!overlaps(clip, clip.track, clip.start, nd)) clip.duration = nd;
     } else {
-      let d = Math.max(dx, clip.type === "image" ? -o.start : -Math.min(o.start, o.inPoint));
+      let d = Math.max(dx, isStill(clip) ? -o.start : -Math.min(o.start, o.inPoint));
       d = Math.min(d, o.duration - 0.2);
       if (!overlaps(clip, clip.track, o.start + d, o.duration - d)) {
-        clip.start = o.start + d; clip.duration = o.duration - d; if (clip.type !== "image") clip.inPoint = o.inPoint + d;
+        clip.start = o.start + d; clip.duration = o.duration - d; if (!isStill(clip)) clip.inPoint = o.inPoint + d;
       }
     }
     renderTimeline(); syncMedia(true);
@@ -249,6 +275,8 @@ function initTimeline() {
     const lane = e.target.closest(".lane"); if (!lane) return;
     e.preventDefault(); lane.classList.remove("over");
     const t = Math.max(0, (e.clientX - lane.getBoundingClientRect().left) / state.pps);
+    const sid = e.dataTransfer.getData("application/x-ecom-sticker");
+    if (sid) { const st = STICKERS.find(x => x.id === sid); if (st && lane.dataset.kind === "video") addSticker(st, +lane.dataset.track, t); else setStatus("Un sticker se dépose sur une piste vidéo (V1 à V3)."); return; }
     const id = e.dataTransfer.getData("application/x-ecom-media");
     let ms = [];
     if (id) { const m = state.media.find(x => x.id === id); if (m) ms = [m]; }
@@ -258,35 +286,68 @@ function initTimeline() {
   });
 }
 
-/* ---------- Propriétés du clip sélectionné ---------- */
+/* ---------- Panneau de réglages (à droite) ---------- */
+const RATIOS = { "9:16": 9 / 16, "16:9": 16 / 9, "4:5": 4 / 5, "1:1": 1 };
+const SIZES = { "1080": { "16:9": [1920, 1080], "9:16": [1080, 1920], "4:5": [1080, 1350], "1:1": [1080, 1080] }, "480": { "16:9": [854, 480], "9:16": [480, 854], "4:5": [480, 600], "1:1": [480, 480] } };
+function applyRatio() {
+  $("frame").style.setProperty("--ar", RATIOS[state.ratio] || 16 / 9);
+  document.querySelectorAll("#ratioGroup button").forEach(b => b.classList.toggle("on", b.dataset.ratio === state.ratio));
+  renderProps();
+}
 function renderProps() {
-  const bar = $("propsBar"), c = getSel();
-  if (!c) { bar.innerHTML = `<span class="hint">Sélectionnez un clip pour régler volume, taille et position • Glissez ses bords pour le rogner</span>`; return; }
-  const sl = (key, label, min, max, val, unit) => `<label>${label} <input type="range" data-p="${key}" min="${min}" max="${max}" value="${val}"><span>${val}${unit}</span></label>`;
-  let h = `<b>${esc(c.name)}</b>`;
-  if (c.type !== "image" && (c.kind === "audio" || c.hasAudio)) h += sl("volume", "Volume", 0, 100, c.volume, "%");
-  if (c.kind === "video") h += sl("scale", "Taille", 10, 100, c.scale, "%") + sl("x", "Position X", -50, 50, c.x, "") + sl("y", "Position Y", -50, 50, c.y, "") + `<button id="resetProps">Recentrer</button>`;
-  bar.innerHTML = h;
+  const box = $("inspector"), c = getSel();
+  if (!c) {
+    const sz = SIZES["1080"][state.ratio];
+    box.innerHTML = `<div class="insp-title">Projet</div><div class="insp-info">Format : <b>${state.ratio}</b><br>Qualité max : <b>${sz[0]}×${sz[1]}</b><br>Durée : <b>${fmt(total())}</b><br>Clips : <b>${state.clips.length}</b></div><div class="insp-hint">Cliquez sur un clip de la timeline pour afficher ses réglages ici : volume, taille, position, animation…<br><br>Le format se change sous l'aperçu (9:16, 16:9, 4:5, 1:1).</div>`;
+    return;
+  }
+  const row = (key, label, min, max, val, unit, step) => `<div class="row"><label>${label}<span>${val}${unit}</span></label><input type="range" data-p="${key}" data-u="${unit}" min="${min}" max="${max}" step="${step || 1}" value="${val}"></div>`;
+  const kindTxt = c.type === "sticker" ? "Sticker" : c.type === "image" ? "Photo" : c.kind === "audio" ? "Audio" : "Vidéo";
+  let h = `<div class="insp-title">Détails <small>${kindTxt}</small></div><div class="insp-name">${esc(c.name)}</div>`;
+  if (!isStill(c) && (c.kind === "audio" || c.hasAudio)) h += `<div class="insp-sec"><h4>Audio</h4>${row("volume", "Volume", 0, 100, c.volume, "%")}</div>`;
+  if (c.kind === "video") {
+    h += `<div class="insp-sec"><h4>Image</h4>${row("scale", "Taille", 10, 100, c.scale, "%")}${row("x", "Position X", -50, 50, c.x, "")}${row("y", "Position Y", -50, 50, c.y, "")}`;
+    if (c.type !== "sticker") h += `<div class="row seg"><button data-fit="fit" class="${c.fit === "fill" ? "" : "on"}">Ajuster</button><button data-fit="fill" class="${c.fit === "fill" ? "on" : ""}">Remplir</button></div>`;
+    h += `<div class="row"><button id="resetProps" style="width:100%">Recentrer</button></div></div>`;
+  }
+  if (c.type === "sticker") {
+    h += `<div class="insp-sec"><h4>Animation</h4><div class="row"><label>Mouvement</label><select data-p="anim">${Object.keys(EcomAnim.LOOPS).map(k => `<option value="${k}"${(c.anim || "none") === k ? " selected" : ""}>${EcomAnim.LOOPS[k].label}</option>`).join("")}</select></div>${row("duration", "Durée", 1, 10, +c.duration.toFixed(1), " s", 0.5)}<div class="insp-hint">Apparition « pop » + mouvement en boucle + disparition.</div></div>`;
+  }
+  h += `<div class="insp-sec"><div class="insp-hint">Début : ${fmt(c.start, 1)} • Durée : ${fmt(c.duration, 1)}<br>Glissez les bords du clip pour le rogner.</div></div>`;
+  box.innerHTML = h;
 }
 function initProps() {
-  $("propsBar").addEventListener("input", e => {
-    const k = e.target.dataset.p, c = getSel(); if (!k || !c) return;
-    c[k] = +e.target.value; e.target.nextElementSibling.textContent = e.target.value + (k === "volume" || k === "scale" ? "%" : "");
-    syncMedia();
+  const box = $("inspector");
+  box.addEventListener("input", e => {
+    const k = e.target.dataset.p, c = getSel(); if (!k || !c || e.target.tagName === "SELECT") return;
+    const v = +e.target.value;
+    if (k === "duration") {
+      if (overlaps(c, c.track, c.start, v)) { e.target.value = c.duration; return; }
+      c.duration = v; renderTimeline();
+    } else c[k] = v;
+    e.target.previousElementSibling.querySelector("span").textContent = e.target.value + (e.target.dataset.u || "");
+    syncMedia(true);
   });
-  $("propsBar").addEventListener("click", e => {
-    if (e.target.id === "resetProps") { const c = getSel(); if (c) { c.scale = 100; c.x = 0; c.y = 0; renderProps(); syncMedia(true); } }
+  box.addEventListener("change", e => {
+    const k = e.target.dataset.p, c = getSel(); if (!c) return;
+    if (k === "anim") { c.anim = e.target.value; pause(); seek(c.start); play(); }
+  });
+  box.addEventListener("click", e => {
+    const c = getSel(); if (!c) return;
+    if (e.target.id === "resetProps") { c.scale = 100; c.x = 0; c.y = 0; if (c.type === "sticker") c.scale = 30; renderProps(); syncMedia(true); }
+    if (e.target.dataset.fit) { c.fit = e.target.dataset.fit; renderProps(); syncMedia(true); }
   });
 }
 
 /* ---------- Panneaux ---------- */
-const TITLES = { media: "Médias", audio: "Audio", text: "Texte", captions: "Légendes", effects: "Effets", transitions: "Transitions" };
+const TITLES = { media: "Médias", audio: "Audio", text: "Texte", stickers: "Stickers", captions: "Légendes", effects: "Effets", transitions: "Transitions" };
 function showPanel(name) {
   currentPanel = name; $("panelTitle").textContent = TITLES[name] || name;
   document.querySelectorAll(".tool").forEach(b => b.classList.toggle("active", b.dataset.panel === name));
   const pc = $("panelContent");
   if (name === "media") pc.innerHTML = `<div id="mediaList"></div><p class="tip">Glissez un média sur une piste de la timeline (V1 à V3), ou double-cliquez pour l'ajouter.</p>`;
   else if (name === "audio") pc.innerHTML = `<div class="panel-pad"><button id="addTrackBtn2" class="primary wide">＋ Ajouter piste audio</button></div><div id="mediaList"></div><p class="tip">Glissez un son sur A1, A2, A3 ou sur la zone « nouvelle piste ». Une vidéo glissée sur une piste audio n'en garde que le son.</p>`;
+  else if (name === "stickers") pc.innerHTML = `<div class="sticker-grid">${STICKERS.map(st => `<div class="stk" draggable="true" data-stk="${st.id}" title="${esc(st.name)}"><img src="${stickerDir ? fileUrl(stickerPath(st.id)) : ""}"><small>${esc(st.name)}</small></div>`).join("")}</div><p class="tip">Cliquez sur un sticker pour l'ajouter à la tête de lecture (3 s, animé), ou glissez-le sur une piste vidéo. Réglez taille, position et animation dans le panneau de droite.</p>`;
   else if (name === "captions") { pc.innerHTML = captionsHtml(); bindCaptions(); }
   else pc.innerHTML = `<div class="media-card">Bientôt disponible</div>`;
   renderMedia();
@@ -332,7 +393,7 @@ function bindCaptions() {
 function audioSources(filter) {
   const out = [];
   state.clips.forEach(c => {
-    if (c.type === "image" || c.volume <= 0) return;
+    if (isStill(c) || c.volume <= 0) return;
     const isAudio = c.kind === "audio";
     if (!isAudio && !c.hasAudio) return;
     if (filter === "video" && isAudio) return;
@@ -350,7 +411,7 @@ function buildCaptions(r) {
     words.forEach(w => {
       if (cur) {
         const gap = w.start - cur.end, len = (cur.text + " " + w.word).length;
-        if (gap > 0.8 || len > 38 || w.end - cur.start > 3.8 || (/[.!?…]$/.test(cur.text) && cur.text.length > 12) || (/[,;:]$/.test(cur.text) && cur.text.length > 24)) flush();
+        if (gap > 0.8 || len > (RATIOS[state.ratio] > 1.5 ? 38 : RATIOS[state.ratio] > 0.95 ? 30 : 24) || w.end - cur.start > 3.8 || (/[.!?…]$/.test(cur.text) && cur.text.length > 12) || (/[,;:]$/.test(cur.text) && cur.text.length > 24)) flush();
       }
       if (!cur) cur = { start: w.start, end: w.end, text: w.word }; else { cur.text += " " + w.word; cur.end = w.end; }
     });
@@ -391,25 +452,26 @@ async function openProject() {
   const d = await window.ecom.loadProject();
   if (!d || !d.state) return setStatus("Projet illisible ou annulé.");
   pause(); state = { ...freshState(), ...d.state, selected: null };
-  (state.clips || []).forEach(c => { c.scale = c.scale || 100; c.x = c.x || 0; c.y = c.y || 0; c.volume = c.volume == null ? 100 : c.volume; });
-  P.t = 0; $("zoom").value = state.pps; showPanel(currentPanel); renderTimeline(); renderProps(); syncMedia(true); updateUI(); setStatus("Projet chargé");
+  state.ratio = RATIOS[state.ratio] ? state.ratio : "16:9";
+  (state.clips || []).forEach(c => { if (c.type === "sticker" && c.stickerId) c.path = stickerPath(c.stickerId); c.scale = c.scale || 100; c.x = c.x || 0; c.y = c.y || 0; c.volume = c.volume == null ? 100 : c.volume; });
+  P.t = 0; $("zoom").value = state.pps; applyRatio(); showPanel(currentPanel); renderTimeline(); syncMedia(true); updateUI(); setStatus("Projet chargé");
 }
 function newProject() {
   if (state.clips.length && !confirm("Créer un nouveau projet ? Les modifications non enregistrées seront perdues.")) return;
-  pause(); state = freshState(); P.t = 0; showPanel(currentPanel); renderTimeline(); renderProps(); syncMedia(true); updateUI();
+  pause(); state = freshState(); P.t = 0; applyRatio(); showPanel(currentPanel); renderTimeline(); syncMedia(true); updateUI();
 }
 
 /* ---------- Export ---------- */
 function openExport() {
   if (!state.clips.length) return setStatus("Ajoutez des clips à la timeline avant d'exporter.");
-  pause(); $("exportLog").textContent = ""; $("expBar").classList.add("hidden"); $("expFill").style.width = "0"; $("exportModal").classList.remove("hidden");
+  pause(); const s1 = SIZES["1080"][state.ratio], s2 = SIZES["480"][state.ratio]; $("exportInfo").textContent = `Format ${state.ratio} — 1080p : ${s1[0]}×${s1[1]} • 480p : ${s2[0]}×${s2[1]}`; $("exportLog").textContent = ""; $("expBar").classList.add("hidden"); $("expFill").style.width = "0"; $("exportModal").classList.remove("hidden");
 }
 async function doExport() {
   const out = await window.ecom.pickExportPath("EcomVideoStudio-export.mp4"); if (!out) return;
   const T = total();
-  const video = state.clips.filter(c => c.kind === "video").map(c => ({ path: c.path, type: c.type, track: c.track, start: c.start, inPoint: c.inPoint, duration: c.duration, scale: c.scale, x: c.x, y: c.y }));
+  const video = state.clips.filter(c => c.kind === "video").map(c => ({ path: c.path, type: c.type, track: c.track, start: c.start, inPoint: c.inPoint, duration: c.duration, scale: c.scale, x: c.x, y: c.y, fit: c.fit, anim: c.anim }));
   $("doExport").disabled = true; $("exportLog").textContent = "Export en cours…\n"; $("expBar").classList.remove("hidden");
-  const r = await window.ecom.exportVideo({ video, audio: audioSources("all"), total: T, resolution, output: out, captions: $("burnCaps").checked ? state.captions : [] });
+  const r = await window.ecom.exportVideo({ video, audio: audioSources("all"), total: T, resolution, ratio: state.ratio, output: out, captions: $("burnCaps").checked ? state.captions : [] });
   $("doExport").disabled = false;
   if (r.ok) { $("expFill").style.width = "100%"; $("exportLog").textContent = "✔ Export terminé :\n" + r.output + (r.warning ? "\n⚠ " + r.warning : ""); setStatus("Export terminé"); }
   else $("exportLog").textContent = "❌ Échec de l'export :\n" + r.error;
@@ -432,11 +494,13 @@ $("scrub").onclick = e => { const r = $("scrub").getBoundingClientRect(); seek((
 $("newBtn").onclick = newProject; $("openProject").onclick = openProject; $("saveProject").onclick = saveProject;
 $("exportBtn").onclick = openExport; $("cancelExport").onclick = () => $("exportModal").classList.add("hidden"); $("doExport").onclick = doExport;
 document.querySelectorAll(".quality-grid button").forEach(b => b.onclick = () => { document.querySelectorAll(".quality-grid button").forEach(x => x.classList.remove("selected")); b.classList.add("selected"); resolution = b.dataset.res; });
+document.querySelectorAll("#ratioGroup button").forEach(b => b.onclick = () => { state.ratio = b.dataset.ratio; applyRatio(); setStatus("Format " + state.ratio); });
 document.querySelector(".side-bottom").onclick = () => showPanel("captions");
 
 const pc = $("panelContent");
-pc.addEventListener("dragstart", e => { const it = e.target.closest(".media-item"); if (it) { e.dataTransfer.setData("application/x-ecom-media", it.dataset.id); e.dataTransfer.effectAllowed = "copy"; } });
+pc.addEventListener("dragstart", e => { const sk = e.target.closest(".stk"); if (sk) { e.dataTransfer.setData("application/x-ecom-sticker", sk.dataset.stk); e.dataTransfer.effectAllowed = "copy"; return; } const it = e.target.closest(".media-item"); if (it) { e.dataTransfer.setData("application/x-ecom-media", it.dataset.id); e.dataTransfer.effectAllowed = "copy"; } });
 pc.addEventListener("click", e => {
+  const sk = e.target.closest(".stk"); if (sk) { const st = STICKERS.find(x => x.id === sk.dataset.stk); if (st) addSticker(st); return; }
   const b = e.target.closest("[data-add]"); if (b) { const m = state.media.find(x => x.id === b.dataset.add); if (m) quickAdd(m); }
   if (e.target.id === "addTrackBtn2") addAudioTrack();
 });
@@ -452,5 +516,6 @@ window.addEventListener("keydown", e => {
   else if (e.key === "Delete" || e.key === "Backspace") deleteSelected();
 });
 
-initTimeline(); initProps(); showPanel("media"); renderTimeline(); renderProps(); updateUI();
+initTimeline(); initProps(); showPanel("media"); renderTimeline(); applyRatio(); updateUI();
+window.ecom.getStickerDir().then(d => { stickerDir = d; if (currentPanel === "stickers") showPanel("stickers"); });
 window.ecom.getSettings().then(s => { capSettings = s; });

@@ -1,6 +1,6 @@
 {
   "name": "ecomvideostudio",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "EcomVideoStudio - desktop video editor",
   "main": "src/main.js",
   "author": "ECOM ACADEMY",
@@ -52,7 +52,8 @@
     },
     "publish": null,
     "asarUnpack": [
-      "node_modules/ffmpeg-static/**"
+      "node_modules/ffmpeg-static/**",
+      "src/stickers/**"
     ]
   }
 }

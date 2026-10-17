@@ -1,5 +1,9 @@
 // Construction des commandes FFmpeg (module sans dépendance Electron, testable seul)
 const FPS = 30;
+const anim = require('./anim');
+
+const SIZES = { '1080': { '16:9': [1920, 1080], '9:16': [1080, 1920], '4:5': [1080, 1350], '1:1': [1080, 1080] }, '480': { '16:9': [854, 480], '9:16': [480, 854], '4:5': [480, 600], '1:1': [480, 480] } };
+function resolutionFor(ratio, quality) { const t = (SIZES[quality] || SIZES['1080'])[ratio] || SIZES['1080']['16:9']; return { w: t[0], h: t[1] }; }
 
 function num(n, d = 3) { return Number(n).toFixed(d); }
 
@@ -33,14 +37,28 @@ function buildExportArgs(o, res, burn, output) {
   let last = '0:v', idx = 1;
   const vids = [...(o.video || [])].sort((a, b) => a.track - b.track || a.start - b.start);
   vids.forEach((c, i) => {
-    if (c.type === 'image') args.push('-loop', '1', '-framerate', String(FPS), '-t', num(c.duration), '-i', c.path);
+    const isImg = c.type === 'image' || c.type === 'sticker';
+    if (isImg) args.push('-loop', '1', '-framerate', String(FPS), '-t', num(c.duration), '-i', c.path);
     else args.push('-ss', num(c.inPoint || 0), '-t', num(c.duration), '-i', c.path);
     const s = Math.max(0.05, Math.min(1, (c.scale == null ? 100 : c.scale) / 100));
     const bw = Math.max(2, Math.round((W * s) / 2) * 2), bh = Math.max(2, Math.round((H * s) / 2) * 2);
     const dx = Math.round(((c.x || 0) / 100) * W), dy = Math.round(((c.y || 0) / 100) * H);
-    const pre = c.type === 'image' ? 'format=rgba,' : '';
-    fc.push(`[${idx}:v]fps=${FPS},${pre}scale=${bw}:${bh}:force_original_aspect_ratio=decrease,setsar=1,setpts=PTS-STARTPTS+${num(c.start)}/TB[v${i}]`);
-    fc.push(`[${last}][v${i}]overlay=x='(W-w)/2+(${dx})':y='(H-h)/2+(${dy})':format=auto:eof_action=pass:enable='between(t,${num(c.start)},${num(c.start + c.duration)})'[b${i}]`);
+    const start = num(c.start), end = num(c.start + c.duration);
+    let chain = `[${idx}:v]fps=${FPS},` + (isImg ? 'format=rgba,' : '');
+    let ox = `(W-w)/2+(${dx})`, oy = `(H-h)/2+(${dy})`;
+    if (c.fit === 'fill' && c.type !== 'sticker') chain += `scale=${bw}:${bh}:force_original_aspect_ratio=increase,crop=${bw}:${bh},setsar=1`;
+    else chain += `scale=${bw}:${bh}:force_original_aspect_ratio=decrease,setsar=1`;
+    if (c.type === 'sticker' && !c.noAnim) {
+      const A = anim.exprs(c.anim || 'none', c.duration);
+      if (A.rot !== '0') chain += `,rotate=a='${A.rot}':c=none:ow='hypot(iw,ih)':oh='hypot(iw,ih)'`;
+      chain += `,scale=w='max(2,iw*(${A.s}))':h='max(2,ih*(${A.s}))':eval=frame`;
+      const lt = e => e.replace(/\bt\b/g, `(t-${start})`);
+      if (A.dx !== '0') ox += `+(${lt(A.dx)})*W`;
+      if (A.dy !== '0') oy += `+(${lt(A.dy)})*H`;
+    }
+    chain += `,setpts=PTS-STARTPTS+${start}/TB[v${i}]`;
+    fc.push(chain);
+    fc.push(`[${last}][v${i}]overlay=x='${ox}':y='${oy}':format=auto:eof_action=pass:enable='between(t,${start},${end})'[b${i}]`);
     last = `b${i}`;
     idx++;
   });
@@ -72,7 +90,7 @@ function assTime(t) {
 }
 
 function buildAss(caps, W, H) {
-  const size = Math.round(H * 0.06), mv = Math.round(H * 0.07), ol = Math.max(2, Math.round(H * 0.004)), mh = Math.round(W * 0.06);
+  const size = Math.round(Math.min(W, H) * 0.06), mv = Math.round(H * 0.07), ol = Math.max(2, Math.round(H * 0.004)), mh = Math.round(W * 0.06);
   let s = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n` +
     `[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n` +
     `Style: Default,Arial,${size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${ol},1,2,${mh},${mh},${mv},1\n\n` +
@@ -84,4 +102,4 @@ function buildAss(caps, W, H) {
   return s;
 }
 
-module.exports = { audioGraph, buildExportArgs, buildTranscribeArgs, buildAss, assTime };
+module.exports = { resolutionFor, audioGraph, buildExportArgs, buildTranscribeArgs, buildAss, assTime };

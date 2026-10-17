@@ -1,5 +1,11 @@
-# EcomVideoStudio — v1.1.0
+# EcomVideoStudio — v1.2.0
 Logiciel desktop de montage vidéo pour Windows 10+ (Electron + FFmpeg).
+
+## Nouveautés v1.2.0
+- **Format du projet** sous l'aperçu : 9:16, 16:9, 4:5 ou 1:1 (l'aperçu et l'export suivent le format choisi).
+- **Panneau de réglages à droite** : volume, taille, position, Ajuster/Remplir, durée et animation du clip sélectionné. L'aperçu est plus compact.
+- **Aperçu immédiat** : un média ajouté s'affiche tout de suite dans l'aperçu (la tête de lecture se place sur le clip) et la timeline montre des vignettes.
+- **Onglet Stickers** : 30 stickers animés (apparition « pop », mouvement en boucle, disparition) de 3 s, ajoutables par clic ou glisser-déposer sur V1 à V3, réglables et exportés dans la vidéo.
 
 ## Nouveautés v1.1.0
 - **3 pistes vidéo superposables (V1, V2, V3)** : glissez des vidéos ou des photos depuis l'onglet Médias (ou depuis l'Explorateur Windows) sur une piste. V3 passe au-dessus de V2, qui passe au-dessus de V1.

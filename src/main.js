@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, safeStorage } = require("electron")
 const path = require("path"), fs = require("fs"), os = require("os");
 const { spawn } = require("child_process");
 const ffmpegPath = require("ffmpeg-static").replace("app.asar", "app.asar.unpacked");
-const { buildExportArgs, buildTranscribeArgs, buildAss } = require("./ffgraph");
+const { buildExportArgs, buildTranscribeArgs, buildAss, resolutionFor } = require("./ffgraph");
 
 let win;
 function createWindow() {
@@ -53,6 +53,17 @@ ipcMain.handle("open-media", async () => {
   return r.canceled ? [] : r.filePaths;
 });
 ipcMain.handle("probe", (_, f) => probe(f));
+ipcMain.handle("sticker-dir", () => path.join(__dirname, "stickers"));
+ipcMain.handle("thumb", (_, file, dur) => new Promise(resolve => {
+  const chunks = [];
+  const ss = Math.max(0, Math.min(0.5, (dur || 1) / 2));
+  let p;
+  try { p = spawn(ffmpegPath, ["-hide_banner", "-loglevel", "error", "-ss", String(ss), "-i", file, "-frames:v", "1", "-vf", "scale=-2:72", "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "6", "pipe:1"], { windowsHide: true }); }
+  catch (e) { return resolve(""); }
+  p.stdout.on("data", d => chunks.push(d));
+  p.on("error", () => resolve(""));
+  p.on("close", () => { const b = Buffer.concat(chunks); resolve(b.length ? "data:image/jpeg;base64," + b.toString("base64") : ""); });
+}));
 ipcMain.handle("save-project", async (_, data) => {
   const r = await dialog.showSaveDialog(win, { title: "Enregistrer le projet", defaultPath: "EcomVideoStudio-project.json", filters: [{ name: "Projet EcomVideoStudio", extensions: ["json"] }] });
   if (r.canceled) return null;
@@ -78,7 +89,9 @@ function prepareSubs(tmp, caps, res) {
   }
 }
 ipcMain.handle("export-video", async (_, o) => {
-  const res = o.resolution === "480" ? { w: 854, h: 480 } : { w: 1920, h: 1080 };
+  const res = resolutionFor(o.ratio, o.resolution);
+  const unpack = p => String(p).replace(/app\.asar(?!\.unpacked)/, "app.asar.unpacked");
+  o.video = (o.video || []).map(c => ({ ...c, path: unpack(c.path) }));
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ecomvs-"));
   try {
     const caps = (o.captions || []).filter(c => c.text && c.end > c.start);
@@ -90,6 +103,12 @@ ipcMain.handle("export-video", async (_, o) => {
       send("export-progress", "\nLes légendes n'ont pas pu être incrustées, nouvel essai sans légendes…\n");
       r = await runFF(buildExportArgs(o, res, false, o.output), { cwd: tmp, onData: s => send("export-progress", s) });
       if (r.code === 0) warning = "Export terminé, mais sans les légendes incrustées (moteur vidéo incompatible).";
+    }
+    if (r.code !== 0 && o.video.some(c => c.type === "sticker")) {
+      send("export-progress", "\nAnimation des stickers non supportée, nouvel essai avec des stickers fixes…\n");
+      o.video = o.video.map(c => ({ ...c, noAnim: true }));
+      r = await runFF(buildExportArgs(o, res, burn, o.output), { cwd: tmp, onData: s => send("export-progress", s) });
+      if (r.code === 0) warning = "Export terminé, mais les stickers sont fixes (animation non supportée par le moteur vidéo).";
     }
     return r.code === 0 ? { ok: true, output: o.output, warning } : { ok: false, error: r.stderr.slice(-800) || "Erreur FFmpeg" };
   } catch (e) {

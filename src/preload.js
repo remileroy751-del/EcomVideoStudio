@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 contextBridge.exposeInMainWorld("ecom", {
   openMedia: () => ipcRenderer.invoke("open-media"),
   probe: f => ipcRenderer.invoke("probe", f),
+  thumb: (f, d) => ipcRenderer.invoke("thumb", f, d),
+  getStickerDir: () => ipcRenderer.invoke("sticker-dir"),
   saveProject: d => ipcRenderer.invoke("save-project", d),
   loadProject: () => ipcRenderer.invoke("load-project"),
   pickExportPath: n => ipcRenderer.invoke("pick-export-path", n),
