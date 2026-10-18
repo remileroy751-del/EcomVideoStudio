@@ -1,6 +1,8 @@
 // Construction des commandes FFmpeg (module sans dépendance Electron, testable seul)
 const FPS = 30;
 const anim = require('./anim');
+const fxlib = require('./effects');
+const path = require('path');
 
 const SIZES = { '1080': { '16:9': [1920, 1080], '9:16': [1080, 1920], '4:5': [1080, 1350], '1:1': [1080, 1080] }, '480': { '16:9': [854, 480], '9:16': [480, 854], '4:5': [480, 600], '1:1': [480, 480] } };
 function resolutionFor(ratio, quality) { const t = (SIZES[quality] || SIZES['1080'])[ratio] || SIZES['1080']['16:9']; return { w: t[0], h: t[1] }; }
@@ -38,16 +40,29 @@ function buildExportArgs(o, res, burn, output) {
   const vids = [...(o.video || [])].sort((a, b) => a.track - b.track || a.start - b.start);
   vids.forEach((c, i) => {
     const isImg = c.type === 'image' || c.type === 'sticker';
+    const myIdx = idx++;
     if (isImg) args.push('-loop', '1', '-framerate', String(FPS), '-t', num(c.duration), '-i', c.path);
     else args.push('-ss', num(c.inPoint || 0), '-t', num(c.duration), '-i', c.path);
-    const s = Math.max(0.05, Math.min(1, (c.scale == null ? 100 : c.scale) / 100));
+    const ovs = (c.type !== 'sticker' && !c.noFx && o.fxDir) ? fxlib.overlaysOf(c.fx) : [];
+    const ovIdx = ovs.map(id => { args.push('-stream_loop', '-1', '-t', num(c.duration), '-i', path.join(o.fxDir, `fx_${id}.mp4`)); return idx++; });
+    const s = Math.max(0.05, Math.min(3, (c.scale == null ? 100 : c.scale) / 100));
     const bw = Math.max(2, Math.round((W * s) / 2) * 2), bh = Math.max(2, Math.round((H * s) / 2) * 2);
     const dx = Math.round(((c.x || 0) / 100) * W), dy = Math.round(((c.y || 0) / 100) * H);
     const start = num(c.start), end = num(c.start + c.duration);
-    let chain = `[${idx}:v]fps=${FPS},` + (isImg ? 'format=rgba,' : '');
+    let chain = `[${myIdx}:v]fps=${FPS},` + (isImg ? 'format=rgba,' : '');
     let ox = `(W-w)/2+(${dx})`, oy = `(H-h)/2+(${dy})`;
+    let cw = null, ch = null;
+    if (c.type !== 'sticker') {
+      if (c.fit === 'fill') { cw = bw; ch = bh; }
+      else if (c.srcW && c.srcH) { const k = Math.min(bw / c.srcW, bh / c.srcH); cw = fxlib.even(c.srcW * k); ch = fxlib.even(c.srcH * k); }
+    }
     if (c.fit === 'fill' && c.type !== 'sticker') chain += `scale=${bw}:${bh}:force_original_aspect_ratio=increase,crop=${bw}:${bh},setsar=1`;
+    else if (cw) chain += `scale=${cw}:${ch},setsar=1`;
     else chain += `scale=${bw}:${bh}:force_original_aspect_ratio=decrease,setsar=1`;
+    if (c.type !== 'sticker' && !c.noFx) {
+      const parts = fxlib.ffChain(c.fx, bw, bh, cw, ch, c.duration);
+      if (parts.length) chain += ',' + parts.join(',');
+    }
     if (c.type === 'sticker' && !c.noAnim) {
       const A = anim.exprs(c.anim || 'none', c.duration);
       if (A.rot !== '0') chain += `,rotate=a='${A.rot}':c=none:ow='hypot(iw,ih)':oh='hypot(iw,ih)'`;
@@ -56,11 +71,26 @@ function buildExportArgs(o, res, burn, output) {
       if (A.dx !== '0') ox += `+(${lt(A.dx)})*W`;
       if (A.dy !== '0') oy += `+(${lt(A.dy)})*H`;
     }
-    chain += `,setpts=PTS-STARTPTS+${start}/TB[v${i}]`;
-    fc.push(chain);
+    const blendPath = ovs.length > 0 && cw;
+    if (blendPath) chain += ',format=gbrp';
+    let cur = `c${i}`;
+    fc.push(`${chain}[${cur}]`);
+    if (blendPath) ovs.forEach((id, k) => {
+      fc.push(`[${ovIdx[k]}:v]fps=${FPS},scale=${cw}:${ch}:force_original_aspect_ratio=increase,crop=${cw}:${ch},format=gbrp[f${i}_${k}]`);
+      fc.push(`[${cur}][f${i}_${k}]blend=all_mode=screen:shortest=1[m${i}_${k}]`);
+      cur = `m${i}_${k}`;
+    });
+    const fade = c.type !== 'sticker' && !c.noFx ? fxlib.ffFade(c.fx, c.duration) : '';
+    if (fade) { fc.push(`[${cur}]${fade}[fd${i}]`); cur = `fd${i}`; }
+    fc.push(`[${cur}]setpts=PTS-STARTPTS+${start}/TB[v${i}]`);
     fc.push(`[${last}][v${i}]overlay=x='${ox}':y='${oy}':format=auto:eof_action=pass:enable='between(t,${start},${end})'[b${i}]`);
     last = `b${i}`;
-    idx++;
+    if (ovs.length && !blendPath) ovs.forEach((id, k) => { // repli (dimensions inconnues) : superposition par transparence
+      const n = `${i}_${k}`;
+      fc.push(`[${ovIdx[k]}:v]fps=${FPS},split[fa${n}][fb${n}];[fb${n}]format=gray[fg${n}];[fa${n}][fg${n}]alphamerge,scale=${bw}:${bh}:force_original_aspect_ratio=increase,crop=${bw}:${bh},format=rgba,setpts=PTS-STARTPTS+${start}/TB[fx${n}]`);
+      fc.push(`[${last}][fx${n}]overlay=x='(W-w)/2+(${dx})':y='(H-h)/2+(${dy})':format=auto:eof_action=pass:enable='between(t,${start},${end})'[bx${n}]`);
+      last = `bx${n}`;
+    });
   });
   if (burn) fc.push(`[${last}]subtitles=filename=subs.ass:fontsdir=.,format=yuv420p[vout]`);
   else fc.push(`[${last}]format=yuv420p[vout]`);

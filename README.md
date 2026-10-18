@@ -1,5 +1,11 @@
-# EcomVideoStudio — v1.2.0
+# EcomVideoStudio — v1.3.0
 Logiciel desktop de montage vidéo pour Windows 10+ (Electron + FFmpeg).
+
+## Nouveautés v1.3.0
+- **Logo et icône** du logiciel : lettre E + pellicule rouge 3D (fenêtre, installeur, raccourcis).
+- **Pied de page** : « Créé par Ecom Academy • Mail : ecom.academy.tg@gmail.com ».
+- **Onglet Effets : 41 effets** (couleur, film, mouvement, ambiance dont flammes, étincelles, neige, pluie, confettis…). Sélectionnez un clip, cliquez sur un effet : il s'applique à tout le clip (jusqu'à 4 par clip). Recliquez pour le retirer.
+- **Déplacement direct dans l'aperçu** : cliquez un clip ou un sticker dans l'aperçu, glissez-le pour le déplacer, tirez un coin pour changer sa taille.
 
 ## Nouveautés v1.2.0
 - **Format du projet** sous l'aperçu : 9:16, 16:9, 4:5 ou 1:1 (l'aperçu et l'export suivent le format choisi).

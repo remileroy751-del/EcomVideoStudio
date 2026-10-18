@@ -8,6 +8,7 @@ let win;
 function createWindow() {
   win = new BrowserWindow({
     width: 1500, height: 930, minWidth: 1100, minHeight: 700, backgroundColor: "#090b10",
+    icon: path.join(__dirname, "icon.png"),
     webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false },
     title: "EcomVideoStudio"
   });
@@ -40,7 +41,10 @@ function probe(file) {
     const hasVideo = /Stream #.*Video:/.test(s);
     const hasAudio = /Stream #.*Audio:/.test(s);
     const sz = /Video:.*?(\d{2,5})x(\d{2,5})/.exec(s);
-    return { duration, hasVideo, hasAudio, width: sz ? +sz[1] : 0, height: sz ? +sz[2] : 0 };
+    const rot = /rotation of (-?\d+(?:\.\d+)?) degrees/.exec(s);
+    let width = sz ? +sz[1] : 0, height = sz ? +sz[2] : 0;
+    if (rot && Math.abs(Math.round(+rot[1])) % 180 === 90) { const t = width; width = height; height = t; } // vidéos de téléphone pivotées
+    return { duration, hasVideo, hasAudio, width, height };
   });
 }
 
@@ -54,6 +58,7 @@ ipcMain.handle("open-media", async () => {
 });
 ipcMain.handle("probe", (_, f) => probe(f));
 ipcMain.handle("sticker-dir", () => path.join(__dirname, "stickers"));
+ipcMain.handle("fx-dir", () => path.join(__dirname, "effects"));
 ipcMain.handle("thumb", (_, file, dur) => new Promise(resolve => {
   const chunks = [];
   const ss = Math.max(0, Math.min(0.5, (dur || 1) / 2));
@@ -92,6 +97,7 @@ ipcMain.handle("export-video", async (_, o) => {
   const res = resolutionFor(o.ratio, o.resolution);
   const unpack = p => String(p).replace(/app\.asar(?!\.unpacked)/, "app.asar.unpacked");
   o.video = (o.video || []).map(c => ({ ...c, path: unpack(c.path) }));
+  o.fxDir = unpack(path.join(__dirname, "effects"));
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ecomvs-"));
   try {
     const caps = (o.captions || []).filter(c => c.text && c.end > c.start);
@@ -109,6 +115,12 @@ ipcMain.handle("export-video", async (_, o) => {
       o.video = o.video.map(c => ({ ...c, noAnim: true }));
       r = await runFF(buildExportArgs(o, res, burn, o.output), { cwd: tmp, onData: s => send("export-progress", s) });
       if (r.code === 0) warning = "Export terminé, mais les stickers sont fixes (animation non supportée par le moteur vidéo).";
+    }
+    if (r.code !== 0 && o.video.some(c => c.fx && c.fx.length)) {
+      send("export-progress", "\nUn effet n'est pas supporté par le moteur vidéo, nouvel essai sans effets…\n");
+      o.video = o.video.map(c => ({ ...c, noFx: true }));
+      r = await runFF(buildExportArgs(o, res, burn, o.output), { cwd: tmp, onData: s => send("export-progress", s) });
+      if (r.code === 0) warning = "Export terminé, mais sans les effets (non supportés par le moteur vidéo).";
     }
     return r.code === 0 ? { ok: true, output: o.output, warning } : { ok: false, error: r.stderr.slice(-800) || "Erreur FFmpeg" };
   } catch (e) {
